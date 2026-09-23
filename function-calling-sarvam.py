@@ -1,7 +1,4 @@
-from dotenv import load_dotenv
-load_dotenv()
 import os
-
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -9,7 +6,11 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
+from pipecat.pipeline.worker import (
+    PipelineParams,
+    PipelineWorker,
+    ProcessorUnusablePolicy,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -17,39 +18,24 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.sarvam.llm import SarvamLLMService
+from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
-from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.base_transport import (
+    BaseTransport,
+    TransportParams,
+)
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
+from function_calling_sarvam import (
+    get_current_weather,
+    get_restaurant_recommendation,
+)
+
 load_dotenv(override=True)
 
-
-async def get_current_weather(params: FunctionCallParams, location: str, format: str):
-    """Get the current weather.
-
-    Args:
-        location: The city and state, e.g. "San Francisco, CA".
-        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
-    """
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
-
-
-async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
-    """Get a restaurant recommendation.
-
-    Args:
-        location: The city and state, e.g. "San Francisco, CA".
-    """
-    await params.result_callback({"name": "The Golden Dragon"})
-
-
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
@@ -69,9 +55,11 @@ transport_params = {
     ),
 }
 
-
-async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info("Starting bot")
+async def run_bot(
+    transport: BaseTransport,
+    runner_args: RunnerArguments,
+):
+    logger.info("Starting Stuti's voice agent")
 
     stt = SarvamSTTService(
         api_key=os.environ["SARVAM_API_KEY"],
@@ -87,21 +75,64 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice="shubh",
         ),
     )
+
     llm = GroqLLMService(
-    api_key=os.environ["GROQ_API_KEY"],
-    settings=GroqLLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        api_key=os.environ["GROQ_API_KEY"],
+        settings=GroqLLMService.Settings(
+            model="llama-3.1-70b-versatile",
         ),
     )
 
+    llm.register_function(
+        "get_current_weather",
+        get_current_weather,
+    )
+
+    llm.register_function(
+        "get_restaurant_recommendation",
+        get_restaurant_recommendation,
+    )
+
+    logger.info("Function-calling tools registered")
+
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+        logger.info(f"Function calls started: {function_calls}")
+        await service.push_frame(
+            TTSSpeakFrame("Let me check on that.")
+        )
 
-    context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    context = LLMContext(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are Stuti's helpful voice assistant. "
+                    "You are having a natural voice conversation "
+                    "with the user. "
+                    "Your responses will be spoken aloud. "
+                    "Keep responses short, natural, helpful, "
+                    "and conversational. "
+                    "Do not use emojis, markdown, bullet points, "
+                    "or formatting that sounds unnatural when spoken. "
+                    "Use the available tools whenever the user asks "
+                    "for current weather or a restaurant recommendation."
+                ),
+            }
+        ],
+        tools=[
+            get_current_weather,
+            get_restaurant_recommendation,
+        ],
+    )
+
+    user_aggregator, assistant_aggregator = (
+        LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                vad_analyzer=SileroVADAnalyzer()
+            ),
+        )
     )
 
     pipeline = Pipeline(
@@ -126,16 +157,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(
+        handle_sigint=runner_args.handle_sigint
+    )
 
     await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        # Kick off the conversation.
         context.add_message(
-            {"role": "developer", "content": "Please introduce yourself to the user."}
+            {
+                "role": "developer",
+                "content": (
+                    "Introduce yourself to the user. "
+                    "Say that you are Stuti's voice assistant "
+                    "and ask how you can help."
+                ),
+            }
         )
         await worker.queue_frames([LLMRunFrame()])
 
@@ -146,14 +185,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await runner.run()
 
-
 async def bot(runner_args: RunnerArguments):
-    """Main bot entry point compatible with Pipecat Cloud."""
-    transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args)
-
+    transport = await create_transport(
+        runner_args,
+        transport_params,
+    )
+    await run_bot(
+        transport,
+        runner_args,
+    )
 
 if __name__ == "__main__":
     from pipecat.runner.run import main
-
     main()
