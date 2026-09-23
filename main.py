@@ -30,6 +30,11 @@ from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
+from function-calling-sarvam import (
+    get_current_weather,
+    get_restaurant_recommendation,
+)
+
 # FUNCTION CALLING TOOLS
 async def get_current_weather(
     params: FunctionCallParams,
