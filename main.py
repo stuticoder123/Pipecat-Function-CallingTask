@@ -257,8 +257,6 @@ async def run_bot(
 
     await runner.run()
 
-
-
 # PIPECAT ENTRY POINT
 
 async def bot(
