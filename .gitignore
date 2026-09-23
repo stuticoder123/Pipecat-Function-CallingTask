@@ -1,0 +1,22 @@
+# Environment variables
+.env
+.env.*
+
+# Keep the example environment file
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
