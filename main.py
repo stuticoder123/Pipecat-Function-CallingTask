@@ -25,8 +25,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
 # FUNCTION CALLING TOOLS
@@ -76,14 +74,6 @@ async def get_restaurant_recommendation(
 # TRANSPORT CONFIGURATION
 transport_params = {
     "eval": lambda: EvalTransportParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-    ),
-    "daily": lambda: DailyParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-    ),
-    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
